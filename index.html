@@ -173,8 +173,9 @@
         scene.add(new THREE.AmbientLight(0xffffff, 1.0));
 
         // Visual Guides
-        const gridHelper = new THREE.GridHelper(20000, 20000/100, 0x94a3b8, 0xe2e8f0);
-        scene.add(gridHelper);
+        // 오류 원인 수정: window.gridHelper에 할당하여 전역에서 접근할 수 있도록 수정
+        window.gridHelper = new THREE.GridHelper(20000, 20000/100, 0x94a3b8, 0xe2e8f0);
+        scene.add(window.gridHelper);
 
         const axesHelper = new THREE.AxesHelper(1000);
         scene.add(axesHelper);
@@ -260,8 +261,8 @@
                 else btn.classList.remove('btn-active');
             });
             
-            // GridHelper 재생성
-            scene.remove(gridHelper);
+            // GridHelper 재생성 (수정됨)
+            scene.remove(window.gridHelper);
             const size = 20000;
             const divisions = size / gridSpacing;
             window.gridHelper = new THREE.GridHelper(size, divisions, 0x94a3b8, 0xe2e8f0);
