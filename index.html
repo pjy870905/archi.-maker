@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>2D/3D Structural Modeler</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Pretendard', sans-serif; background-color: #f8fafc; touch-action: none; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        .glass { background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(8px); border: 1px solid rgba(0,0,0,0.1); box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+        .btn-active { background: #2563eb !important; color: white !important; }
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    </style>
+</head>
+<body class="text-slate-800 antialiased select-none">
+
+    <div id="canvas-container" class="absolute inset-0"></div>
+
+    <!-- Top Navigation -->
+    <div class="absolute top-0 left-0 w-full p-2 pointer-events-none z-20 flex justify-between items-start">
+        <!-- Plane Selector -->
+        <div class="glass p-2 rounded-xl pointer-events-auto flex flex-col gap-2 min-w-[200px]">
+            <div class="flex justify-between items-center">
+                <span class="text-xs font-bold text-slate-600">현재 작업 평면</span>
+                <button onclick="togglePlaneManager()" class="text-[10px] bg-slate-100 px-2 py-1 rounded hover:bg-slate-200">관리</button>
+            </div>
+            <select id="plane-select" onchange="switchPlane(this.value)" class="w-full text-sm p-1 border rounded bg-white font-bold text-blue-600 outline-none">
+                <!-- Planes injected here -->
+            </select>
+            <div id="status-text" class="text-[10px] text-slate-500 text-center">도면 이동: 드래그 | 줌: 핀치</div>
+        </div>
+
+        <!-- Settings Toggle -->
+        <button onclick="toggleSettings()" class="glass p-2 rounded-xl pointer-events-auto hover:bg-slate-50">
+            <svg class="w-6 h-6 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+        </button>
+    </div>
+
+    <!-- Plane Manager Panel -->
+    <div id="plane-manager" class="hidden absolute top-20 left-2 w-64 glass rounded-xl p-3 pointer-events-auto z-20 flex-col gap-3">
+        <h3 class="text-xs font-bold border-b pb-1">평면 추가 (행/열/층)</h3>
+        <div class="grid grid-cols-2 gap-2 text-xs">
+            <select id="new-plane-type" class="p-1.5 border rounded">
+                <option value="XY">XY 평면 (층/Z)</option>
+                <option value="XZ">XZ 평면 (행/Y)</option>
+                <option value="YZ">YZ 평면 (열/X)</option>
+            </select>
+            <input type="number" id="new-plane-val" placeholder="좌표값" class="p-1.5 border rounded">
+        </div>
+        <button onclick="addPlaneFromUI()" class="w-full bg-blue-600 text-white text-xs py-2 rounded font-bold">새 평면 생성</button>
+    </div>
+
+    <!-- Settings & Properties Panel -->
+    <div id="settings-panel" class="hidden absolute top-20 right-2 w-64 glass rounded-xl p-3 pointer-events-auto z-20 flex-col gap-4">
+        
+        <!-- Grid Settings -->
+        <div>
+            <h3 class="text-xs font-bold border-b pb-1 mb-2">그리드 간격</h3>
+            <div class="flex gap-1">
+                <button onclick="setGridSpacing(10)" id="grid-btn-10" class="flex-1 bg-slate-100 py-1 text-xs rounded border">10</button>
+                <button onclick="setGridSpacing(50)" id="grid-btn-50" class="flex-1 bg-slate-100 py-1 text-xs rounded border">50</button>
+                <button onclick="setGridSpacing(100)" id="grid-btn-100" class="flex-1 bg-slate-100 py-1 text-xs rounded border btn-active">100</button>
+                <button onclick="setGridSpacing(1000)" id="grid-btn-1000" class="flex-1 bg-slate-100 py-1 text-xs rounded border">1000</button>
+            </div>
+        </div>
+
+        <!-- Size Options Editor -->
+        <div>
+            <h3 class="text-xs font-bold border-b pb-1 mb-2">부재 Size 옵션 관리</h3>
+            <div class="flex gap-1 mb-1">
+                <input type="text" id="new-size-input" placeholder="ex) H-200x200" class="flex-1 text-xs p-1 border rounded">
+                <button onclick="addSizeOption()" class="bg-slate-800 text-white px-2 py-1 rounded text-xs">+</button>
+            </div>
+            <div id="size-list" class="max-h-20 overflow-y-auto text-xs space-y-1 p-1 bg-slate-50 border rounded"></div>
+        </div>
+
+        <!-- Selected Member Properties -->
+        <div id="prop-panel" class="hidden border-t pt-3">
+            <h3 class="text-xs font-bold text-blue-600 mb-2">선택된 부재 속성</h3>
+            <div class="space-y-2 text-xs">
+                <div>
+                    <label class="block text-slate-500 mb-0.5">부재 Size</label>
+                    <select id="prop-size" onchange="updateSelectedMember()" class="w-full p-1 border rounded"></select>
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="block text-slate-500 mb-0.5">시작점 형태</label>
+                        <select id="prop-start-shape" onchange="updateSelectedMember()" class="w-full p-1 border rounded">
+                            <option value="line">선형 (기본)</option>
+                            <option value="triangle">삼각형</option>
+                            <option value="circle">원형</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-slate-500 mb-0.5">끝점 형태</label>
+                        <select id="prop-end-shape" onchange="updateSelectedMember()" class="w-full p-1 border rounded">
+                            <option value="line">선형 (기본)</option>
+                            <option value="triangle">삼각형</option>
+                            <option value="circle">원형</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="text-[10px] text-slate-400 bg-slate-50 p-1 rounded font-mono" id="prop-coords">
+                    <!-- Coords -->
+                </div>
+                <button onclick="deleteSelected()" class="w-full bg-red-100 text-red-600 py-1.5 rounded font-bold border border-red-200">부재 삭제</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bottom Modes -->
+    <div class="absolute bottom-6 left-1/2 -translate-x-1/2 glass rounded-xl p-1.5 flex gap-1 pointer-events-auto z-20">
+        <button onclick="setMode('PAN')" id="mode-PAN" class="w-16 py-2 flex flex-col items-center gap-1 rounded-lg bg-blue-600 text-white transition">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 11.5V14m0-2.5v-6a1.5 1.5 0 113 0m-3 6a1.5 1.5 0 00-3 0v2a7.5 7.5 0 0015 0v-5a1.5 1.5 0 00-3 0m-6-3V11m0-5.5v-1a1.5 1.5 0 013 0v1m0 0V11m0-5.5a1.5 1.5 0 013 0v3m0 0V11"></path></svg>
+            <span class="text-[10px] font-bold">화면이동</span>
+        </button>
+        <button onclick="setMode('DRAW')" id="mode-DRAW" class="w-16 py-2 flex flex-col items-center gap-1 rounded-lg text-slate-500 hover:bg-slate-100 transition">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
+            <span class="text-[10px] font-bold">선 그리기</span>
+        </button>
+        <button onclick="setMode('SELECT')" id="mode-SELECT" class="w-16 py-2 flex flex-col items-center gap-1 rounded-lg text-slate-500 hover:bg-slate-100 transition">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"></path></svg>
+            <span class="text-[10px] font-bold">선택/수정</span>
+        </button>
+    </div>
+
+    <!-- Drawing Hint -->
+    <div id="draw-hint" class="hidden absolute bottom-24 left-1/2 -translate-x-1/2 bg-slate-800 text-white px-4 py-2 rounded-full text-xs font-bold z-20 pointer-events-none shadow-lg">
+        시작점을 터치하세요 (그리드 스냅)
+    </div>
+
+    <script>
+        // --- Core State ---
+        let mode = 'PAN'; // PAN, DRAW, SELECT
+        let gridSpacing = 100;
+        let planes = [
+            { id: 'plane_1', type: 'XY', val: 0, name: 'XY 평면 (Z=0)' }
+        ];
+        let currentPlaneId = 'plane_1';
+        let memberSizes = ['H-200x200', 'H-400x400', 'B-200x200'];
+        let members = [];
+        let selectedMember = null;
+        let idCounter = 1;
+
+        // Draw State
+        let isDrawing = false;
+        let drawStartPt = null;
+
+        // --- Three.js Setup (2D Orthographic Focus) ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xf1f5f9);
+
+        // 2D 도면 작업을 위해 OrthographicCamera 사용 (원근감 없음)
+        const frustumSize = 4000;
+        const aspect = window.innerWidth / window.innerHeight;
+        const camera = new THREE.OrthographicCamera(frustumSize * aspect / -2, frustumSize * aspect / 2, frustumSize / 2, frustumSize / -2, -10000, 10000);
+        
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+        // Controls
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableRotate = false; // 2D 환경이므로 회전 금지
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.1;
+
+        // Lights
+        scene.add(new THREE.AmbientLight(0xffffff, 1.0));
+
+        // Visual Guides
+        const gridHelper = new THREE.GridHelper(20000, 20000/100, 0x94a3b8, 0xe2e8f0);
+        scene.add(gridHelper);
+
+        const axesHelper = new THREE.AxesHelper(1000);
+        scene.add(axesHelper);
+
+        // Interactive Raycasting Objects
+        const raycaster = new THREE.Raycaster();
+        raycaster.params.Line.threshold = 20; // 선 선택 민감도
+        const mouse = new THREE.Vector2();
+        
+        // Ghost Elements for Drawing
+        const matGhostPt = new THREE.MeshBasicMaterial({ color: 0xef4444 });
+        const ghostPtMesh = new THREE.Mesh(new THREE.CircleGeometry(15, 16), matGhostPt);
+        ghostPtMesh.visible = false;
+        scene.add(ghostPtMesh);
+
+        const ghostLineMat = new THREE.LineDashedMaterial({ color: 0xef4444, dashSize: 20, gapSize: 20 });
+        const ghostLineGeo = new THREE.BufferGeometry();
+        ghostLineGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+        const ghostLine = new THREE.Line(ghostLineGeo, ghostLineMat);
+        ghostLine.computeLineDistances();
+        ghostLine.visible = false;
+        scene.add(ghostLine);
+
+        // --- Init & UI Updaters ---
+
+        function init() {
+            updatePlaneDropdown();
+            updateSizeListUI();
+            switchPlane('plane_1');
+        }
+
+        function togglePlaneManager() {
+            const panel = document.getElementById('plane-manager');
+            panel.classList.toggle('hidden');
+            panel.classList.toggle('flex');
+        }
+
+        function toggleSettings() {
+            const panel = document.getElementById('settings-panel');
+            panel.classList.toggle('hidden');
+            panel.classList.toggle('flex');
+            if(selectedMember && !panel.classList.contains('hidden')) {
+                document.getElementById('prop-panel').classList.remove('hidden');
+            }
+        }
+
+        function setMode(newMode) {
+            mode = newMode;
+            ['PAN', 'DRAW', 'SELECT'].forEach(m => {
+                const btn = document.getElementById(`mode-${m}`);
+                if (m === mode) {
+                    btn.classList.add('bg-blue-600', 'text-white');
+                    btn.classList.remove('text-slate-500', 'hover:bg-slate-100');
+                } else {
+                    btn.classList.remove('bg-blue-600', 'text-white');
+                    btn.classList.add('text-slate-500', 'hover:bg-slate-100');
+                }
+            });
+
+            const drawHint = document.getElementById('draw-hint');
+            controls.enabled = (mode === 'PAN'); // PAN 모드에서만 화면 이동 허용
+            ghostPtMesh.visible = false;
+            ghostLine.visible = false;
+            isDrawing = false;
+            drawStartPt = null;
+
+            if (mode === 'DRAW') {
+                drawHint.classList.remove('hidden');
+                drawHint.innerText = "시작점을 터치하세요 (그리드 스냅)";
+                clearSelection();
+            } else {
+                drawHint.classList.add('hidden');
+            }
+        }
+
+        // --- Grid & Plane Logic ---
+
+        function setGridSpacing(val) {
+            gridSpacing = val;
+            [10, 50, 100, 1000].forEach(v => {
+                const btn = document.getElementById(`grid-btn-${v}`);
+                if (v === val) btn.classList.add('btn-active');
+                else btn.classList.remove('btn-active');
+            });
+            
+            // GridHelper 재생성
+            scene.remove(gridHelper);
+            const size = 20000;
+            const divisions = size / gridSpacing;
+            window.gridHelper = new THREE.GridHelper(size, divisions, 0x94a3b8, 0xe2e8f0);
+            
+            // 현재 평면에 맞게 회전 복구
+            const cp = planes.find(p => p.id === currentPlaneId);
+            alignGridToPlane(cp.type, cp.val);
+            scene.add(window.gridHelper);
+        }
+
+        function addPlaneFromUI() {
+            const type = document.getElementById('new-plane-type').value;
+            const val = parseFloat(document.getElementById('new-plane-val').value) || 0;
+            
+            // 중복 검사
+            if (planes.some(p => p.type === type && p.val === val)) {
+                alert("이미 동일한 위치에 평면이 존재합니다.");
+                return;
+            }
+
+            let name = "";
+            if (type === 'XY') name = `XY 평면 (Z=${val}) - 층`;
+            if (type === 'XZ') name = `XZ 평면 (Y=${val}) - 행`;
+            if (type === 'YZ') name = `YZ 평면 (X=${val}) - 열`;
+
+            const newPlane = { id: `plane_${Date.now()}`, type, val, name };
+            planes.push(newPlane);
+            updatePlaneDropdown();
+            
+            document.getElementById('plane-select').value = newPlane.id;
+            switchPlane(newPlane.id);
+            togglePlaneManager();
+        }
+
+        function updatePlaneDropdown() {
+            const select = document.getElementById('plane-select');
+            select.innerHTML = '';
+            planes.forEach(p => {
+                const opt = document.createElement('option');
+                opt.value = p.id;
+                opt.innerText = p.name;
+                select.appendChild(opt);
+            });
+            select.value = currentPlaneId;
+        }
+
+        function alignGridToPlane(type, val) {
+            window.gridHelper.position.set(0,0,0);
+            window.gridHelper.rotation.set(0,0,0);
+
+            if (type === 'XY') {
+                window.gridHelper.rotation.x = Math.PI / 2;
+                window.gridHelper.position.z = val;
+            } else if (type === 'XZ') {
+                window.gridHelper.position.y = val;
+            } else if (type === 'YZ') {
+                window.gridHelper.rotation.z = Math.PI / 2;
+                window.gridHelper.position.x = val;
+            }
+        }
+
+        function switchPlane(id) {
+            currentPlaneId = id;
+            const p = planes.find(p => p.id === id);
+            
+            alignGridToPlane(p.type, p.val);
+
+            // 카메라 위치 및 바라보는 방향 (Orthographic 기준)
+            const d = 5000;
+            if (p.type === 'XY') {
+                camera.position.set(0, 0, p.val + d);
+                camera.up.set(0, 1, 0); // Y가 위쪽
+            } else if (p.type === 'XZ') {
+                camera.position.set(0, p.val + d, 0);
+                camera.up.set(0, 0, -1); // Z가 위/아래 방향이 됨. 건축에서는 보통 Z가 높이이므로 up=(0,0,-1)
+            } else if (p.type === 'YZ') {
+                camera.position.set(p.val + d, 0, 0);
+                camera.up.set(0, 1, 0); // Y가 위쪽
+            }
+            
+            camera.lookAt(
+                p.type === 'YZ' ? p.val : 0,
+                p.type === 'XZ' ? p.val : 0,
+                p.type === 'XY' ? p.val : 0
+            );
+            
+            controls.target.set(
+                p.type === 'YZ' ? p.val : 0,
+                p.type === 'XZ' ? p.val : 0,
+                p.type === 'XY' ? p.val : 0
+            );
+            controls.update();
+
+            // 모든 Shape들이 현재 카메라를 바라보도록 업데이트 (2D 평면 효과)
+            members.forEach(m => updateMemberVisuals(m));
+            clearSelection();
+        }
+
+        // Get mathematical plane for raycasting based on current view
+        function getActiveMathPlane() {
+            const cp = planes.find(p => p.id === currentPlaneId);
+            const mathPlane = new THREE.Plane();
+            if (cp.type === 'XY') mathPlane.setComponents(0, 0, 1, -cp.val);
+            if (cp.type === 'XZ') mathPlane.setComponents(0, 1, 0, -cp.val);
+            if (cp.type === 'YZ') mathPlane.setComponents(1, 0, 0, -cp.val);
+            return mathPlane;
+        }
+
+        function getSnappedPoint(intersectPt, type, val) {
+            const snap = gridSpacing;
+            const pt = intersectPt.clone();
+            
+            if (type === 'XY') {
+                pt.x = Math.round(pt.x / snap) * snap;
+                pt.y = Math.round(pt.y / snap) * snap;
+                pt.z = val; // 해당 평면에 고정
+            } else if (type === 'XZ') {
+                pt.x = Math.round(pt.x / snap) * snap;
+                pt.z = Math.round(pt.z / snap) * snap;
+                pt.y = val;
+            } else if (type === 'YZ') {
+                pt.y = Math.round(pt.y / snap) * snap;
+                pt.z = Math.round(pt.z / snap) * snap;
+                pt.x = val;
+            }
+            return pt;
+        }
+
+        // --- Member & Data Logic ---
+
+        function updateSizeListUI() {
+            const list = document.getElementById('size-list');
+            list.innerHTML = '';
+            memberSizes.forEach((size, idx) => {
+                const div = document.createElement('div');
+                div.className = "flex justify-between border-b pb-0.5";
+                div.innerHTML = `<span>${size}</span> <button onclick="removeSize(${idx})" class="text-red-500 font-bold">x</button>`;
+                list.appendChild(div);
+            });
+            
+            // Update dropdown in properties
+            const select = document.getElementById('prop-size');
+            const currentVal = select.value;
+            select.innerHTML = '';
+            memberSizes.forEach(size => {
+                const opt = document.createElement('option');
+                opt.value = size; opt.innerText = size;
+                select.appendChild(opt);
+            });
+            if(memberSizes.includes(currentVal)) select.value = currentVal;
+        }
+
+        window.addSizeOption = function() {
+            const input = document.getElementById('new-size-input');
+            const val = input.value.trim();
+            if (val && !memberSizes.includes(val)) {
+                memberSizes.push(val);
+                input.value = '';
+                updateSizeListUI();
+            }
+        }
+        window.removeSize = function(idx) {
+            memberSizes.splice(idx, 1);
+            updateSizeListUI();
+        }
+
+        // 생성: 시작점, 끝점, 연결선을 하나의 그룹(Member)으로
+        function createMember(p1, p2) {
+            const group = new THREE.Group();
+            
+            // Line
+            const lineGeo = new THREE.BufferGeometry().setFromPoints([p1, p2]);
+            const lineMat = new THREE.LineBasicMaterial({ color: 0x1e293b, linewidth: 4 });
+            const lineMesh = new THREE.Line(lineGeo, lineMat);
+            group.add(lineMesh);
+
+            // Start/End meshes (empty initially, built in update)
+            const shape1 = new THREE.Mesh();
+            const shape2 = new THREE.Mesh();
+            group.add(shape1);
+            group.add(shape2);
+
+            scene.add(group);
+
+            const member = {
+                id: `M_${idCounter++}`,
+                p1: p1.clone(),
+                p2: p2.clone(),
+                size: memberSizes[0],
+                startShape: 'line', // line, triangle, circle
+                endShape: 'line',
+                group: group,
+                lineMesh: lineMesh,
+                shape1: shape1,
+                shape2: shape2
+            };
+            
+            members.push(member);
+            updateMemberVisuals(member);
+            return member;
+        }
+
+        function updateMemberVisuals(member) {
+            // 카메라가 어느 축을 바라보는지에 따라 Shape 회전
+            const cp = planes.find(p => p.id === currentPlaneId);
+            
+            const createShapeGeo = (type) => {
+                if (type === 'circle') return new THREE.CircleGeometry(25, 16);
+                if (type === 'triangle') return new THREE.CircleGeometry(30, 3); // 3-sided circle = triangle
+                return new THREE.BufferGeometry(); // Line (empty)
+            };
+
+            const mat = new THREE.MeshBasicMaterial({ color: 0x3b82f6, side: THREE.DoubleSide });
+
+            // Shape 1
+            member.shape1.geometry.dispose();
+            member.shape1.geometry = createShapeGeo(member.startShape);
+            member.shape1.material = mat;
+            member.shape1.position.copy(member.p1);
+            
+            // Shape 2
+            member.shape2.geometry.dispose();
+            member.shape2.geometry = createShapeGeo(member.endShape);
+            member.shape2.material = mat;
+            member.shape2.position.copy(member.p2);
+
+            // 빌보드 효과 (카메라 바라보기)
+            member.shape1.quaternion.copy(camera.quaternion);
+            member.shape2.quaternion.copy(camera.quaternion);
+            
+            // 선택된 부재 하이라이트
+            if (selectedMember === member) {
+                member.lineMesh.material.color.setHex(0xef4444);
+                member.shape1.material.color.setHex(0xef4444);
+                member.shape2.material.color.setHex(0xef4444);
+            } else {
+                member.lineMesh.material.color.setHex(0x1e293b);
+                member.shape1.material.color.setHex(0x3b82f6);
+                member.shape2.material.color.setHex(0x3b82f6);
+            }
+        }
+
+        // --- Interactions (Pointer Events) ---
+        let pointerDownPos = { x: 0, y: 0 };
+
+        renderer.domElement.addEventListener('pointerdown', (e) => {
+            pointerDownPos.x = e.clientX;
+            pointerDownPos.y = e.clientY;
+        });
+
+        renderer.domElement.addEventListener('pointermove', (e) => {
+            if (mode !== 'DRAW') return;
+            
+            mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+
+            const cp = planes.find(p => p.id === currentPlaneId);
+            const mathPlane = getActiveMathPlane();
+            const intersectPt = new THREE.Vector3();
+
+            if (raycaster.ray.intersectPlane(mathPlane, intersectPt)) {
+                const snapped = getSnappedPoint(intersectPt, cp.type, cp.val);
+                
+                ghostPtMesh.visible = true;
+                ghostPtMesh.position.copy(snapped);
+                ghostPtMesh.quaternion.copy(camera.quaternion);
+
+                if (isDrawing && drawStartPt) {
+                    ghostLine.visible = true;
+                    const posAttr = ghostLine.geometry.attributes.position;
+                    posAttr.setXYZ(0, drawStartPt.x, drawStartPt.y, drawStartPt.z);
+                    posAttr.setXYZ(1, snapped.x, snapped.y, snapped.z);
+                    posAttr.needsUpdate = true;
+                    ghostLine.computeLineDistances();
+                }
+            }
+        });
+
+        renderer.domElement.addEventListener('pointerup', (e) => {
+            const dist = Math.hypot(e.clientX - pointerDownPos.x, e.clientY - pointerDownPos.y);
+            if (dist > 10) return; // 드래그 무시
+
+            mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+
+            if (mode === 'SELECT') {
+                // 부재 선택 로직 (Raycast on Lines)
+                const lineMeshes = members.map(m => m.lineMesh);
+                const intersects = raycaster.intersectObjects(lineMeshes);
+                
+                if (intersects.length > 0) {
+                    const hitMesh = intersects[0].object;
+                    const hitMember = members.find(m => m.lineMesh === hitMesh);
+                    selectMember(hitMember);
+                } else {
+                    clearSelection();
+                }
+            } 
+            else if (mode === 'DRAW') {
+                const cp = planes.find(p => p.id === currentPlaneId);
+                const mathPlane = getActiveMathPlane();
+                const intersectPt = new THREE.Vector3();
+
+                if (raycaster.ray.intersectPlane(mathPlane, intersectPt)) {
+                    const snapped = getSnappedPoint(intersectPt, cp.type, cp.val);
+                    
+                    if (!isDrawing) {
+                        // 첫 번째 점
+                        isDrawing = true;
+                        drawStartPt = snapped.clone();
+                        document.getElementById('draw-hint').innerText = "끝점을 터치하여 선 생성";
+                    } else {
+                        // 두 번째 점 (생성)
+                        if (drawStartPt.distanceTo(snapped) > 0.1) {
+                            createMember(drawStartPt, snapped);
+                        }
+                        // 연속 그리기 초기화
+                        isDrawing = false;
+                        drawStartPt = null;
+                        ghostLine.visible = false;
+                        document.getElementById('draw-hint').innerText = "시작점을 터치하세요 (그리드 스냅)";
+                    }
+                }
+            }
+        });
+
+        // --- Properties & Selection ---
+        
+        function selectMember(member) {
+            clearSelection();
+            selectedMember = member;
+            updateMemberVisuals(member); // Red highlight
+            
+            const panel = document.getElementById('prop-panel');
+            panel.classList.remove('hidden');
+            
+            // 부모 Settings 패널이 닫혀있다면 강제 열기
+            document.getElementById('settings-panel').classList.remove('hidden');
+            document.getElementById('settings-panel').classList.add('flex');
+
+            document.getElementById('prop-size').value = member.size;
+            document.getElementById('prop-start-shape').value = member.startShape;
+            document.getElementById('prop-end-shape').value = member.endShape;
+
+            const c = member;
+            document.getElementById('prop-coords').innerHTML = `
+                Start: (${c.p1.x}, ${c.p1.y}, ${c.p1.z})<br>
+                End: &nbsp;(${c.p2.x}, ${c.p2.y}, ${c.p2.z})
+            `;
+        }
+
+        function clearSelection() {
+            const oldSel = selectedMember;
+            selectedMember = null;
+            if (oldSel) updateMemberVisuals(oldSel);
+            document.getElementById('prop-panel').classList.add('hidden');
+        }
+
+        window.updateSelectedMember = function() {
+            if (!selectedMember) return;
+            selectedMember.size = document.getElementById('prop-size').value;
+            selectedMember.startShape = document.getElementById('prop-start-shape').value;
+            selectedMember.endShape = document.getElementById('prop-end-shape').value;
+            updateMemberVisuals(selectedMember);
+        }
+
+        window.deleteSelected = function() {
+            if (!selectedMember) return;
+            scene.remove(selectedMember.group);
+            members = members.filter(m => m !== selectedMember);
+            clearSelection();
+        }
+
+        // --- Resize & Render ---
+        window.addEventListener('resize', () => {
+            const aspect = window.innerWidth / window.innerHeight;
+            camera.left = -frustumSize * aspect / 2;
+            camera.right = frustumSize * aspect / 2;
+            camera.top = frustumSize / 2;
+            camera.bottom = -frustumSize / 2;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if (mode === 'PAN') controls.update(); // PAN 모드일때만 controls 작동
+            renderer.render(scene, camera);
+        }
+
+        init();
+        animate();
+    </script>
+</body>
+</html>
